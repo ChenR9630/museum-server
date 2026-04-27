@@ -1,0 +1,6 @@
+{
+  "build": {
+    "node_version": "18"
+  },
+  "start": "node server.js"
+}
