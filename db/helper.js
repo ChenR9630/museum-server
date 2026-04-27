@@ -31,12 +31,13 @@ function queryOne(sql, params) {
 function run(sql, params) {
   return getDB().then(function(db) {
     db.run(sql, params || [])
-    return saveDB().then(function() {
-      return {
-        lastInsertRowid: db.exec('SELECT last_insert_rowid()')[0].values[0][0],
-        changes: db.getRowsModified()
-      }
-    })
+    saveDB()
+    var rid = db.exec('SELECT last_insert_rowid()')
+    var rowid = rid && rid[0] && rid[0].values && rid[0].values[0] ? rid[0].values[0][0] : 0
+    return {
+      lastInsertRowid: rowid,
+      changes: db.getRowsModified()
+    }
   })
 }
 
