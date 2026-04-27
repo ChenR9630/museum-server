@@ -30,17 +30,13 @@ function queryOne(sql, params) {
 
 function run(sql, params) {
   return getDB().then(function(db) {
-    var stmt = db.prepare(sql)
-    if (params && params.length > 0) {
-      stmt.bind(params)
-    }
-    stmt.step()
-    stmt.free()
-    saveDB()
-    return {
-      lastInsertRowid: db.exec('SELECT last_insert_rowid()')[0].values[0][0],
-      changes: db.getRowsModified()
-    }
+    db.run(sql, params || [])
+    return saveDB().then(function() {
+      return {
+        lastInsertRowid: db.exec('SELECT last_insert_rowid()')[0].values[0][0],
+        changes: db.getRowsModified()
+      }
+    })
   })
 }
 
