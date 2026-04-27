@@ -30,13 +30,20 @@ function queryOne(sql, params) {
 
 function run(sql, params) {
   return getDB().then(function(db) {
-    db.run(sql, params || [])
-    saveDB()
+    // 使用 prepare + step 确保 last_insert_rowid 正确
+    var stmt = db.prepare(sql)
+    stmt.bind(params || [])
+    stmt.step()
+    stmt.free()
+    // 立即获取 last_insert_rowid，在 saveDB 之前
     var rid = db.exec('SELECT last_insert_rowid()')
     var rowid = rid && rid[0] && rid[0].values && rid[0].values[0] ? rid[0].values[0][0] : 0
+    var changes = db.getRowsModified()
+    // 最后保存
+    saveDB()
     return {
       lastInsertRowid: rowid,
-      changes: db.getRowsModified()
+      changes: changes
     }
   })
 }
