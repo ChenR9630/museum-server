@@ -1,41 +1,70 @@
 /**
  * 众像美术馆 - 数据库初始化（sql.js 纯 JS 方案）
  * 零原生依赖，无需编译
+ *
+ * 重构说明：
+ * - getDB() 现在是同步函数，db 实例在 initDB() 完成后才可用
+ * - 使用 initPromise 追踪初始化状态
+ * - 所有需要 db 的地方通过 helper.js 的 async 封装调用
  */
-const initSqlJs = require('sql.js')
-const fs = require('fs')
-const path = require('path')
+var initSqlJs = require('sql.js')
+var fs = require('fs')
+var path = require('path')
+var { config } = require('../config')
 
-// Zeabur 持久化存储挂载点：配置环境变量 DATA_DIR=/data 即可
-// 本地开发默认用 ./data，Zeabur 用 /data（需要创建 Volume 挂载到 /data）
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data')
-const DB_PATH = path.join(DATA_DIR, 'museum.db')
+var DATA_DIR = config.DATA_DIR
+var DB_PATH = path.join(DATA_DIR, config.DB_NAME)
 
-let db = null
+var db = null
+var initPromise = null
+var initialized = false
 
-async function getDB() {
-  if (!db) {
-    await initDB()
-  }
+/**
+ * 初始化数据库（async，启动时调用一次）
+ */
+async function initDB() {
+  if (initPromise) return initPromise
+
+  initPromise = (async function() {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
+
+    var SQL = await initSqlJs()
+
+    if (fs.existsSync(DB_PATH)) {
+      var buffer = fs.readFileSync(DB_PATH)
+      db = new SQL.Database(buffer)
+    } else {
+      db = new SQL.Database()
+    }
+
+    db.run('PRAGMA journal_mode = WAL')
+    db.run('PRAGMA foreign_keys = ON')
+    initTables()
+    saveDB()
+    initialized = true
+    console.log('  \x1b[32m✓ 数据库已就绪\x1b[0m (' + DB_PATH + ')')
+    return db
+  })()
+
+  return initPromise
+}
+
+/**
+ * 获取数据库实例
+ * 同步调用，但要求 initDB() 已完成
+ * 如果未初始化，返回 null（调用方应通过 helper.js 的 async 封装使用）
+ */
+function getDB() {
   return db
 }
 
-async function initDB() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
-
-  const SQL = await initSqlJs()
-
-  if (fs.existsSync(DB_PATH)) {
-    const buffer = fs.readFileSync(DB_PATH)
-    db = new SQL.Database(buffer)
-  } else {
-    db = new SQL.Database()
-  }
-
-  db.run('PRAGMA journal_mode = WAL')
-  db.run('PRAGMA foreign_keys = ON')
-  initTables()
-  saveDB()
+/**
+ * 等待数据库初始化完成，返回 db 实例
+ */
+function getDBAsync() {
+  if (initialized) return Promise.resolve(db)
+  if (initPromise) return initPromise
+  return initDB()
 }
 
 function initTables() {
@@ -227,10 +256,10 @@ function initTables() {
  */
 function saveDB() {
   if (db) {
-    const data = db.export()
-    const buffer = Buffer.from(data)
+    var data = db.export()
+    var buffer = Buffer.from(data)
     fs.writeFileSync(DB_PATH, buffer)
   }
 }
 
-module.exports = { getDB, saveDB }
+module.exports = { initDB, getDB, getDBAsync, saveDB }

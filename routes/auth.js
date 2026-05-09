@@ -5,10 +5,10 @@
  * GET  /api/auth/me        当前用户信息
  * PUT  /api/auth/profile   更新个人资料
  */
-const express = require('express')
-const bcrypt = require('bcryptjs')
-const { queryAll, queryOne, run, asyncHandler } = require('../db/helper')
-const { generateToken, authRequired } = require('../middleware/auth')
+var express = require('express')
+var security = require('../security')
+var { queryAll, queryOne, run, asyncHandler } = require('../db/helper')
+var { createAccessToken, authRequired } = require('../middleware/auth')
 
 var router = express.Router()
 
@@ -28,7 +28,7 @@ router.post('/register', asyncHandler(async function(req, res) {
   if (existing) {
     return res.status(409).json({ error: '用户名已存在' })
   }
-  var hash = bcrypt.hashSync(body.password, 10)
+  var hash = security.hashPassword(body.password)
   var nickname = body.nickname || body.username
   var result = await run(
     'INSERT INTO users (username, password, nickname, avatar, role) VALUES (?, ?, ?, ?, ?)',
@@ -38,7 +38,7 @@ router.post('/register', asyncHandler(async function(req, res) {
     'SELECT id, username, nickname, avatar, role, created_at FROM users WHERE id = ?',
     [result.lastInsertRowid]
   )
-  var token = generateToken(user)
+  var token = createAccessToken(user)
   res.json({ user: user, token: token })
 }))
 
@@ -49,14 +49,14 @@ router.post('/login', asyncHandler(async function(req, res) {
     return res.status(400).json({ error: '用户名和密码不能为空' })
   }
   var user = await queryOne('SELECT * FROM users WHERE username = ?', [body.username])
-  if (!user || !bcrypt.compareSync(body.password, user.password)) {
+  if (!user || !security.verifyPassword(body.password, user.password)) {
     return res.status(401).json({ error: '用户名或密码错误' })
   }
   var safeUser = {
     id: user.id, username: user.username, nickname: user.nickname,
     avatar: user.avatar, role: user.role, created_at: user.created_at
   }
-  var token = generateToken(safeUser)
+  var token = createAccessToken(safeUser)
   res.json({ user: safeUser, token: token })
 }))
 

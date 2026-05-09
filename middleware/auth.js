@@ -1,21 +1,11 @@
 /**
  * 众像美术馆 - JWT 认证中间件
+ *
+ * 职责：Express 中间件（解析 token、注入 req.user）
+ * JWT 操作委托给 security.js，数据库操作委托给 db/helper.js
  */
-const jwt = require('jsonwebtoken')
-const { getDB } = require('../db/init')
-
-const JWT_SECRET = process.env.JWT_SECRET || 'museum_gallery_2026_secret_key'
-
-/**
- * 生成 JWT Token
- */
-function generateToken(user) {
-  return jwt.sign(
-    { id: user.id, username: user.username, role: user.role },
-    JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-  )
-}
+var security = require('../security')
+var { queryOne } = require('../db/helper')
 
 /**
  * 验证 JWT - 必须登录
@@ -25,16 +15,28 @@ function authRequired(req, res, next) {
   if (!auth || !auth.startsWith('Bearer ')) {
     return res.status(401).json({ error: '请先登录', code: 'NO_TOKEN' })
   }
+
+  var token = auth.slice(7)
+  var decoded
+
   try {
-    var decoded = jwt.verify(auth.slice(7), JWT_SECRET)
-    var db = getDB()
-    var user = db.prepare('SELECT id, username, nickname, avatar, role FROM users WHERE id = ?').get(decoded.id)
-    if (!user) return res.status(401).json({ error: '用户不存在', code: 'USER_NOT_FOUND' })
-    req.user = user
-    next()
+    decoded = security.verifyAccessToken(token)
   } catch (e) {
     return res.status(401).json({ error: 'Token 无效或已过期', code: 'INVALID_TOKEN' })
   }
+
+  // token 解析成功，查用户并注入 req.user
+  queryOne('SELECT id, username, nickname, avatar, role FROM users WHERE id = ?', [decoded.id])
+    .then(function(user) {
+      if (!user) {
+        return res.status(401).json({ error: '用户不存在', code: 'USER_NOT_FOUND' })
+      }
+      req.user = user
+      next()
+    })
+    .catch(function() {
+      return res.status(500).json({ error: '服务器错误', code: 'INTERNAL_ERROR' })
+    })
 }
 
 /**
@@ -42,15 +44,27 @@ function authRequired(req, res, next) {
  */
 function authOptional(req, res, next) {
   var auth = req.headers.authorization
-  if (auth && auth.startsWith('Bearer ')) {
-    try {
-      var decoded = jwt.verify(auth.slice(7), JWT_SECRET)
-      var db = getDB()
-      var user = db.prepare('SELECT id, username, nickname, avatar, role FROM users WHERE id = ?').get(decoded.id)
-      if (user) req.user = user
-    } catch (e) { /* ignore */ }
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return next()
   }
-  next()
+
+  var token = auth.slice(7)
+  var decoded
+
+  try {
+    decoded = security.verifyAccessToken(token)
+  } catch (e) {
+    return next() // token 无效，当未登录处理
+  }
+
+  queryOne('SELECT id, username, nickname, avatar, role FROM users WHERE id = ?', [decoded.id])
+    .then(function(user) {
+      if (user) req.user = user
+      next()
+    })
+    .catch(function() {
+      next() // 数据库错误，当未登录处理
+    })
 }
 
 /**
@@ -63,4 +77,4 @@ function adminOnly(req, res, next) {
   next()
 }
 
-module.exports = { generateToken, authRequired, authOptional, adminOnly }
+module.exports = { createAccessToken: security.createAccessToken, authRequired, authOptional, adminOnly }

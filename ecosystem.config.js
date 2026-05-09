@@ -12,7 +12,7 @@ module.exports = {
         NODE_ENV: 'production',
         PORT: 3000,
         DATA_DIR: '/opt/museum-server/data',
-        JWT_SECRET: 'CHANGE_ME_TO_A_RANDOM_STRING'
+        JWT_SECRET: 'museum_gallery_2026_secret_key_change_in_production'
       }
     }
   ]

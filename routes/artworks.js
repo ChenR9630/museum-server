@@ -9,19 +9,17 @@
  * GET    /api/artworks/:id/comments  作品评论列表
  * POST   /api/artworks/:id/comments  发表评论
  */
-const express = require('express')
-const multer = require('multer')
-const path = require('path')
-const { queryAll, queryOne, run, asyncHandler } = require('../db/helper')
-const { authRequired, authOptional } = require('../middleware/auth')
+var express = require('express')
+var multer = require('multer')
+var path = require('path')
+var { config } = require('../config')
+var { queryAll, queryOne, run, asyncHandler } = require('../db/helper')
+var { authRequired, authOptional } = require('../middleware/auth')
 
 var router = express.Router()
 
 // ============ 文件上传配置 ============
-// 上传目录：Zeabur 用 DATA_DIR=/data，则上传到 /data/uploads/artworks
-var UPLOAD_BASE = process.env.DATA_DIR
-  ? path.join(process.env.DATA_DIR, 'uploads')
-  : path.join(__dirname, '..', 'uploads')
+var UPLOAD_BASE = path.join(config.DATA_DIR, 'uploads')
 
 var storage = multer.diskStorage({
   destination: function(req, file, cb) {
@@ -37,7 +35,7 @@ var storage = multer.diskStorage({
 })
 var upload = multer({
   storage: storage,
-  limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10485760 },
+  limits: { fileSize: config.MAX_FILE_SIZE },
   fileFilter: function(req, file, cb) {
     if (file.mimetype.startsWith('image/')) cb(null, true)
     else cb(new Error('仅支持图片文件'), false)

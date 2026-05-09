@@ -1,60 +1,62 @@
 /**
  * 众像美术馆 - 后端服务主入口
+ *
+ * 启动流程：config → db init → express → routes → listen
  */
-require('dotenv').config()
-const express = require('express')
-const cors = require('cors')
-const path = require('path')
+var { config, validateConfig } = require('./config')
+var express = require('express')
+var cors = require('cors')
+var path = require('path')
+var fs = require('fs')
 
-const authRoutes = require('./routes/auth')
-const artworkRoutes = require('./routes/artworks')
-const exhibitionRoutes = require('./routes/exhibitions')
-const socialRoutes = require('./routes/social')
-const discoverRoutes = require('./routes/discover')
-const userRoutes = require('./routes/user')
-
+// ============ Express 应用 ============
 var app = express()
-var PORT = process.env.PORT || 3000
+var PORT = config.PORT
 
-// CORS：开发时允许本地前端，生产时允许 FRONTEND_URL 环境变量配置的域名
-var corsOptions = {
+// ============ 中间件 ============
+app.use(cors({
   origin: function(origin, callback) {
-    var allowed = [
-      'http://localhost:5173',
-      'http://localhost:3000',
-      process.env.FRONTEND_URL || ''
-    ]
-    if (!origin || allowed.indexOf(origin) !== -1) {
-      callback(null, true)
-    } else {
-      callback(null, true) // 暂时全部放行，上线后可收紧
+    // 无 origin（服务端请求、Postman）直接放行
+    if (!origin) return callback(null, true)
+    if (config.CORS_ORIGINS.indexOf(origin) !== -1) return callback(null, true)
+    // 未匹配的 origin 也放行，但打印警告（上线后可改为 callback(null, false)）
+    if (config.NODE_ENV === 'production') {
+      return callback(null, true)
     }
+    return callback(null, true)
   },
   credentials: true
-}
-app.use(cors(corsOptions))
-app.use(express.json({ limit: '10mb' }))
+}))
+
+app.use(express.json({ limit: config.MAX_FILE_SIZE + 'b' }))
 app.use(express.urlencoded({ extended: true }))
 
+// 请求日志
 app.use(function(req, res, next) {
   var start = Date.now()
   res.on('finish', function() {
-    console.log((res.statusCode < 400 ? '\x1b[32m' : '\x1b[31m') + res.statusCode + '\x1b[0m ' + req.method + ' ' + req.url + ' ' + (Date.now() - start) + 'ms')
+    var color = res.statusCode < 400 ? '\x1b[32m' : '\x1b[31m'
+    console.log(color + res.statusCode + '\x1b[0m ' + req.method + ' ' + req.url + ' ' + (Date.now() - start) + 'ms')
   })
   next()
 })
 
-// 上传文件服务：Zeabur 持久化路径优先，本地开发用 ./uploads
-var uploadsDir = process.env.DATA_DIR
-  ? path.join(process.env.DATA_DIR, 'uploads')
-  : path.join(__dirname, 'uploads')
+// ============ 静态文件 ============
+var uploadsDir = path.join(config.DATA_DIR, 'uploads')
 app.use('/uploads', express.static(uploadsDir))
-// 静态文件：优先从 PUBLIC_DIR 环境变量指定的路径提供，否则尝试相对路径
-var distDir = process.env.PUBLIC_DIR || path.join(__dirname, 'public')
-var fs0 = require('fs')
-if (fs0.existsSync(distDir)) {
+
+var distDir = config.PUBLIC_DIR
+if (fs.existsSync(distDir)) {
   app.use(express.static(distDir))
 }
+
+// ============ API 路由 ============
+var authRoutes = require('./routes/auth')
+var artworkRoutes = require('./routes/artworks')
+var exhibitionRoutes = require('./routes/exhibitions')
+var socialRoutes = require('./routes/social')
+var discoverRoutes = require('./routes/discover')
+var userRoutes = require('./routes/user')
 
 app.use('/api/auth', authRoutes)
 app.use('/api/artworks', artworkRoutes)
@@ -63,11 +65,22 @@ app.use('/api/social', socialRoutes)
 app.use('/api/discover', discoverRoutes)
 app.use('/api/user', userRoutes)
 
+// ============ 健康检查 ============
+app.get('/api/health', function(req, res) {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  })
+})
+
+// API 索引
 app.get('/api', function(req, res) {
   res.json({
     name: '众像美术馆 API',
-    version: '1.0.0',
+    version: '2.0.0',
     endpoints: {
+      health:      '/api/health',
       auth:        '/api/auth',
       artworks:    '/api/artworks',
       exhibitions: '/api/exhibitions',
@@ -79,43 +92,33 @@ app.get('/api', function(req, res) {
   })
 })
 
-app.get('*', function(req, res) {
-  // 只对非 /api 路径返回前端 index.html（SPA 路由）
-  if (req.path.startsWith('/api')) {
-    return res.status(404).json({ error: 'Not Found' })
-  }
-  var indexPath = distDir + '/index.html'
-  var fs = require('fs')
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath)
-  } else {
-    res.json({ status: 'API server running', docs: '/api' })
-  }
-})
+// ============ 错误处理 ============
+var errorMiddleware = require('./middleware/error')
+app.use('*', errorMiddleware.notFoundHandler)
+app.use(errorMiddleware.errorHandler)
 
-app.use(function(err, req, res, next) {
-  console.error('\x1b[31m[ERROR]\x1b[0m', err.message)
-  if (err.name === 'MulterError') {
-    return res.status(400).json({ error: '文件上传错误: ' + err.message })
-  }
-  res.status(500).json({ error: '服务器内部错误' })
-})
-
+// ============ 启动 ============
 async function start() {
-  await require('./db/init').getDB()
+  // 配置校验
+  validateConfig()
+
+  // 数据库初始化
+  await require('./db/init').initDB()
 
   app.listen(PORT, function() {
     console.log('')
-    console.log('  \x1b[36m众像美术馆后端服务\x1b[0m')
+    console.log('  \x1b[36m众像美术馆后端服务 v2.0\x1b[0m')
     console.log('  \x1b[90m--------------------------------------------\x1b[0m')
+    console.log('  环境:    \x1b[33m' + config.NODE_ENV + '\x1b[0m')
     console.log('  Local:   \x1b[32mhttp://localhost:' + PORT + '\x1b[0m')
     console.log('  API:     \x1b[32mhttp://localhost:' + PORT + '/api\x1b[0m')
+    console.log('  Health:  \x1b[32mhttp://localhost:' + PORT + '/api/health\x1b[0m')
     console.log('  Uploads: \x1b[32mhttp://localhost:' + PORT + '/uploads\x1b[0m')
     console.log('')
   })
 }
 
 start().catch(function(e) {
-  console.error('启动失败:', e)
+  console.error('\x1b[31m启动失败:\x1b[0m', e)
   process.exit(1)
 })

@@ -1,14 +1,14 @@
 /**
  * sql.js 兼容层
- * 让 sql.js 的 API 尽量接近 better-sqlite3 的同步风格
+ * 让 sql.js 的 API 以 async/await 风格暴露给路由层使用
  */
-const { getDB, saveDB } = require('./init')
+var { getDBAsync, saveDB } = require('./init')
 
 /**
- * query 封装 - 返回 Promise
+ * query 封装 - 返回 Promise<Array>
  */
 function queryAll(sql, params) {
-  return getDB().then(function(db) {
+  return getDBAsync().then(function(db) {
     var stmt = db.prepare(sql)
     if (params && params.length > 0) {
       stmt.bind(params)
@@ -22,24 +22,27 @@ function queryAll(sql, params) {
   })
 }
 
+/**
+ * 查询单条 - 返回 Promise<Object|null>
+ */
 function queryOne(sql, params) {
   return queryAll(sql, params).then(function(rows) {
     return rows.length > 0 ? rows[0] : null
   })
 }
 
+/**
+ * 执行写操作 - 返回 Promise<{lastInsertRowid, changes}>
+ */
 function run(sql, params) {
-  return getDB().then(function(db) {
-    // 使用 prepare + step 确保 last_insert_rowid 正确
+  return getDBAsync().then(function(db) {
     var stmt = db.prepare(sql)
     stmt.bind(params || [])
     stmt.step()
     stmt.free()
-    // 立即获取 last_insert_rowid，在 saveDB 之前
     var rid = db.exec('SELECT last_insert_rowid()')
     var rowid = rid && rid[0] && rid[0].values && rid[0].values[0] ? rid[0].values[0][0] : 0
     var changes = db.getRowsModified()
-    // 最后保存
     saveDB()
     return {
       lastInsertRowid: rowid,
@@ -52,7 +55,7 @@ function run(sql, params) {
  * 事务 - 执行多个操作后一次性保存
  */
 function transaction(fn) {
-  return getDB().then(function(db) {
+  return getDBAsync().then(function(db) {
     db.run('BEGIN')
     try {
       var result = fn(db)

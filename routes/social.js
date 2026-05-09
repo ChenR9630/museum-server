@@ -9,11 +9,12 @@
  * GET    /api/social/danmaku          弹幕列表
  * POST   /api/social/danmaku          发送弹幕
  */
-const express = require('express')
-const multer = require('multer')
-const path = require('path')
-const { queryAll, queryOne, run, asyncHandler } = require('../db/helper')
-const { authRequired, authOptional } = require('../middleware/auth')
+var express = require('express')
+var multer = require('multer')
+var path = require('path')
+var { config } = require('../config')
+var { queryAll, queryOne, run, asyncHandler } = require('../db/helper')
+var { authRequired, authOptional } = require('../middleware/auth')
 
 var router = express.Router()
 
@@ -32,7 +33,7 @@ var storage = multer.diskStorage({
 })
 var upload = multer({
   storage: storage,
-  limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10485760 },
+  limits: { fileSize: config.MAX_FILE_SIZE },
   fileFilter: function(req, file, cb) {
     if (file.mimetype.startsWith('image/')) cb(null, true)
     else cb(new Error('仅支持图片文件'), false)
